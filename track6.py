@@ -100,9 +100,10 @@ lora_config = LoraConfig(
 
 
 # 4. Load the base model in 4-bit quantization with BitsAndBytesConfig
+use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
 quantization_config = BitsAndBytesConfig(
     load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_compute_dtype=torch.bfloat16 if use_bf16 else torch.float32,
     bnb_4bit_quant_type="nf4",
     bnb_4bit_use_double_quant=True,
 )
@@ -152,7 +153,8 @@ training_args = TrainingArguments(
     lr_scheduler_type="cosine",
     warmup_ratio=0.1,
     num_train_epochs=2,  # Reduced from 3 to 2
-    fp16=True,
+    fp16=False,
+    bf16=use_bf16,
     eval_strategy="steps",
     eval_steps=50,  # Increased eval steps to reduce frequency
     save_strategy="steps",
@@ -189,6 +191,12 @@ trainer = Trainer(
 torch.backends.cuda.enable_flash_sdp(False)
 torch.backends.cuda.enable_mem_efficient_sdp(False)
 torch.backends.cuda.enable_math_sdp(True)
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+try:
+    torch.set_float32_matmul_precision("high")
+except Exception:
+    pass
 train_result = trainer.train()
 
 
