@@ -100,12 +100,13 @@ lora_config = LoraConfig(
 
 
 # 4. Load the base model in 4-bit quantization with BitsAndBytesConfig
-use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+# Force compute in float32 to avoid cublas tensor-op BF16/FP16 path issues
+use_bf16 = False
 quantization_config = BitsAndBytesConfig(
     load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.bfloat16 if use_bf16 else torch.float32,
+    bnb_4bit_compute_dtype=torch.float32,
     bnb_4bit_quant_type="nf4",
-    bnb_4bit_use_double_quant=True,
+    bnb_4bit_use_double_quant=False,
 )
      
 model = AutoModelForCausalLM.from_pretrained(
@@ -154,7 +155,7 @@ training_args = TrainingArguments(
     warmup_ratio=0.1,
     num_train_epochs=2,  # Reduced from 3 to 2
     fp16=False,
-    bf16=use_bf16,
+    bf16=False,
     eval_strategy="steps",
     eval_steps=50,  # Increased eval steps to reduce frequency
     save_strategy="steps",
