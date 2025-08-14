@@ -112,7 +112,7 @@ model = AutoModelForCausalLM.from_pretrained(
     quantization_config=quantization_config,
     device_map=device_map,
     trust_remote_code=True,
-    # attn_implementation="flash_attention_2" #FlashAttention only supports Ampere GPUs or newer.
+    attn_implementation="eager"
 )
 
 
@@ -186,9 +186,9 @@ trainer = Trainer(
 )
 
 
-torch.backends.cuda.enable_flash_sdp(True)
-torch.backends.cuda.enable_mem_efficient_sdp(True)
-torch.backends.cuda.enable_math_sdp(False)
+torch.backends.cuda.enable_flash_sdp(False)
+torch.backends.cuda.enable_mem_efficient_sdp(False)
+torch.backends.cuda.enable_math_sdp(True)
 train_result = trainer.train()
 
 
