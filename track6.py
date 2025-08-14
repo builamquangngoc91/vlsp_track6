@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from evaluate import load
 import os
 
-device_map={'':torch.cuda.current_device()} 
+device_map= "auto" 
      
 import os
 from datasets import load_dataset, Dataset
