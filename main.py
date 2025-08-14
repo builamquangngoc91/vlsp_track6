@@ -30,7 +30,8 @@ def setup_device():
         print("CUDA not available, using CPU. This will be very slow.")
         return "cpu"
     else:
-        return "auto"
+        # Use specific device mapping for 4-bit training
+        return {'': torch.cuda.current_device()}
 
 def setup_tokenizer(model_name):
     """Setup and configure tokenizer"""
