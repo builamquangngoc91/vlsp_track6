@@ -13,6 +13,7 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 import matplotlib.pyplot as plt
 from evaluate import load
 import os
+import gc
      
 import os
 from datasets import load_dataset, Dataset
@@ -171,9 +172,9 @@ data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
 training_args = TrainingArguments(
     output_dir=output_dir,
-    per_device_train_batch_size=2,
-    per_device_eval_batch_size=2,  # Keep at 1
-    gradient_accumulation_steps=16,  # Increased to maintain batch size
+    per_device_train_batch_size=1,
+    per_device_eval_batch_size=1,  # Keep at 1
+    gradient_accumulation_steps=32,  # Maintain effective batch size
     learning_rate=1e-4,  # Slightly reduced learning rate
     lr_scheduler_type="cosine",
     warmup_ratio=0.1,
@@ -213,7 +214,7 @@ except Exception:
     pass
 
 # Try 4-bit → 8-bit → full-precision fallbacks if CUDA/BnB GEMM errors occur
-quant_try_order = ["4bit", "8bit", "full"]
+quant_try_order = ["8bit", "4bit", "full"]
 last_error = None
 for qmode in quant_try_order:
     try:
@@ -228,10 +229,25 @@ for qmode in quant_try_order:
             last_error = e
             # Cleanup and retry with the next quantization mode
             try:
+                del trainer
+            except Exception:
+                pass
+            try:
                 del model
             except Exception:
                 pass
-            torch.cuda.empty_cache()
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+            try:
+                gc.collect()
+            except Exception:
+                pass
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
             continue
         else:
             raise
