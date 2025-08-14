@@ -166,10 +166,10 @@ def train_model(model, train_dataset, eval_dataset, training_args, tokenizer):
         callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
     )
     
-    # Enable optimizations
-    torch.backends.cuda.enable_flash_sdp(True)
-    torch.backends.cuda.enable_mem_efficient_sdp(True)
-    torch.backends.cuda.enable_math_sdp(False)
+    # Disable SDPA optimizations to avoid kernel issues
+    torch.backends.cuda.enable_flash_sdp(False)
+    torch.backends.cuda.enable_mem_efficient_sdp(False)
+    torch.backends.cuda.enable_math_sdp(True)
     
     print("Starting training...")
     train_result = trainer.train()
