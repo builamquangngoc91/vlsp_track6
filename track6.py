@@ -99,23 +99,55 @@ lora_config = LoraConfig(
 )
 
 
-# 4. Load the base model in 4-bit quantization with BitsAndBytesConfig
-# Force compute in float32 to avoid cublas tensor-op BF16/FP16 path issues
-use_bf16 = False
-quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float32,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_use_double_quant=False,
-)
-     
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    quantization_config=quantization_config,
-    device_map=device_map,
-    trust_remote_code=True,
-    attn_implementation="eager"
-)
+def create_bnb_config(quant_mode: str) -> BitsAndBytesConfig | None:
+    if quant_mode == "4bit":
+        # Use float32 compute to avoid fragile tensor-op paths
+        return BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float32,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=False,
+        )
+    if quant_mode == "8bit":
+        return BitsAndBytesConfig(load_in_8bit=True)
+    return None
+
+def build_model_and_trainer(quant_mode: str) -> tuple[AutoModelForCausalLM, Trainer]:
+    bnb_cfg = create_bnb_config(quant_mode)
+    if bnb_cfg is None:
+        # Full precision fallback; prefer bf16 if supported else fp16
+        dtype = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else torch.float16
+        model_local = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            device_map=device_map,
+            torch_dtype=dtype,
+            trust_remote_code=True,
+            attn_implementation="eager",
+        )
+    else:
+        model_local = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            quantization_config=bnb_cfg,
+            device_map=device_map,
+            trust_remote_code=True,
+            attn_implementation="eager",
+        )
+
+    # Prepare and attach LoRA
+    model_local = prepare_model_for_kbit_training(model_local)
+    model_local = get_peft_model(model_local, lora_config)
+    model_local.print_trainable_parameters()
+
+    trainer_local = Trainer(
+        model=model_local,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        args=training_args,
+        data_collator=data_collator,
+        # compute_metrics=compute_metrics,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
+    )
+    return model_local, trainer_local
 
 
 
@@ -128,14 +160,6 @@ model = AutoModelForCausalLM.from_pretrained(
 #     return perplexity.compute(predictions=predictions, references=labels)
 def compute_metrics(eval_pred):
     return {} # Trainer will automatically log eval_loss for us.
-
-
-# Prepare the model for k-bit training
-model = prepare_model_for_kbit_training(model)
-
-# Add LoRA adapters to the model
-model = get_peft_model(model, lora_config)
-model.print_trainable_parameters()
 
 
 output_dir = "./qwen2_5_dolly_qlora"  # Directory to save fine-tuned model
@@ -178,17 +202,6 @@ training_args = TrainingArguments(
     eval_accumulation_steps=1,   # Process eval in smaller chunks
 )
 
-trainer = Trainer(
-    model=model,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
-    args=training_args,
-    data_collator=data_collator,
-    # compute_metrics=compute_metrics,
-    callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
-)
-
-
 torch.backends.cuda.enable_flash_sdp(False)
 torch.backends.cuda.enable_mem_efficient_sdp(False)
 torch.backends.cuda.enable_math_sdp(True)
@@ -198,7 +211,35 @@ try:
     torch.set_float32_matmul_precision("high")
 except Exception:
     pass
-train_result = trainer.train()
+
+# Try 4-bit → 8-bit → full-precision fallbacks if CUDA/BnB GEMM errors occur
+quant_try_order = ["4bit", "8bit", "full"]
+last_error = None
+for qmode in quant_try_order:
+    try:
+        model, trainer = build_model_and_trainer(qmode)
+        train_result = trainer.train()
+        break
+    except RuntimeError as e:
+        err_msg = str(e)
+        if ("CUBLAS_STATUS" in err_msg or "cublas" in err_msg.lower() or
+            "bitsandbytes" in err_msg.lower() or "matmul_4bit" in err_msg or
+            "No available kernel" in err_msg):
+            last_error = e
+            # Cleanup and retry with the next quantization mode
+            try:
+                del model
+            except Exception:
+                pass
+            torch.cuda.empty_cache()
+            continue
+        else:
+            raise
+else:
+    # If all modes failed, re-raise the last CUDA/bnb error
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Training failed without a captured CUDA/bitsandbytes error.")
 
 
 # Merge LoRA vào base model
