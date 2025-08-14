@@ -13,8 +13,6 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 import matplotlib.pyplot as plt
 from evaluate import load
 import os
-
-device_map= "auto" 
      
 import os
 from datasets import load_dataset, Dataset
@@ -26,6 +24,13 @@ api = HfApi(token=HF_TOKEN)
 login(token=HF_TOKEN)  # Hoặc thay bằng login("your_token")
 
 model_name = "VLSP2025-LegalSML/qwen3-1.7b-legal-pretrain"
+
+# Ensure the 4-bit model is loaded on the same device that training will use
+if torch.cuda.is_available():
+    device_map = {"": torch.cuda.current_device()}
+else:
+    device_map = {"": "cpu"}
+
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 print(f"Before : {tokenizer.pad_token}")
 tokenizer.pad_token = tokenizer.eos_token  # Set pad token if it's missing
