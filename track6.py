@@ -14,11 +14,7 @@ import matplotlib.pyplot as plt
 from evaluate import load
 import os
 
-if not torch.cuda.is_available():
-    print("CUDA not available, using CPU. This will be very slow.")
-    device_map = "cpu`"
-else:
-    device_map = "auto"
+device_map={'':torch.cuda.current_device()} 
      
 import os
 from datasets import load_dataset, Dataset
