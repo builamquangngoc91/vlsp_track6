@@ -108,6 +108,7 @@ def load_model(model_name, quantization_config, device_map):
         quantization_config=quantization_config,
         device_map=device_map,
         trust_remote_code=True,
+        attn_implementation="eager",  # Use eager attention to avoid SDPA issues
     )
     
     # Prepare the model for k-bit training
