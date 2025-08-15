@@ -82,7 +82,7 @@ def prepare_dataset(dataset_name, tokenizer):
     reasoning_conversations = Dataset.from_pandas(pd.DataFrame(reasoning_conversations))
     reasoning_conversations = reasoning_conversations.shuffle(seed=3407)
 
-
+    print(f"1. reasoning conversations: {reasoning_conversations}")
     
     return reasoning_conversations
 
