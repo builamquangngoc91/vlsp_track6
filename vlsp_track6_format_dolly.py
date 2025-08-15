@@ -79,6 +79,8 @@ def prepare_dataset(dataset_name, tokenizer):
     reasoning_conversations.name = "text"
     reasoning_conversations = Dataset.from_pandas(pd.DataFrame(reasoning_conversations))
     reasoning_conversations = reasoning_conversations.shuffle(seed=3407)
+
+
     
     return reasoning_conversations
 
@@ -166,6 +168,7 @@ def main():
     # Prepare dataset
     reasoning_conversations = prepare_dataset(dataset_name, tokenizer)
     
+    print(f"Length of reasoning conversations: {len(reasoning_conversations)}")
     # Tokenize dataset
     tokenized_dataset = reasoning_conversations.map(
         lambda examples: tokenize_function(examples, tokenizer),
