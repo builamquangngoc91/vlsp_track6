@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
-
 import torch
-from datasets import load_dataset, Dataset
+from datasets import load_dataset
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -15,32 +13,33 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 import matplotlib.pyplot as plt
 from evaluate import load
 import os
-import pandas as pd
-from huggingface_hub import HfApi, login
 
-# Configuration
-HF_TOKEN = login(token=os.getenv("HF_TOKEN"))  #
+import os
+from datasets import load_dataset, Dataset
+from huggingface_hub import HfApi
+from huggingface_hub import login
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+api = HfApi(token=HF_TOKEN) 
+login(token=HF_TOKEN) 
+
+# 1. Define the model and tokenizer
 model_name = "VLSP2025-LegalSML/qwen3-1.7b-legal-pretrain"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+print(f"Before : {tokenizer.pad_token}")
+tokenizer.pad_token = tokenizer.eos_token  # Set pad token if it's missing
+tokenizer.padding_side = "left"  # IMPORTANT: Set padding_side to 'left' BEFORE tokenizing
+print(f"After : {tokenizer.pad_token}")
+
+# Before : <|endoftext|>
+# After : <|endoftext|>
+
+# 2. Load the dataset
 dataset_name = "thailevann/finetune_track6_vlsp"
-output_dir = "./adapter1"
+dataset = load_dataset(dataset_name, split="train")
 
-def setup_huggingface():
-    """Setup HuggingFace API and login"""
-    api = HfApi(token=HF_TOKEN) 
-    login(token=HF_TOKEN)
-    return api
-
-def setup_tokenizer(model_name):
-    """Setup tokenizer with proper configuration"""
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    print(f"Before : {tokenizer.pad_token}")
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "left"
-    print(f"After : {tokenizer.pad_token}")
-    return tokenizer
-
+# 1. Format the dataset first
 def format_dolly(sample):
-    """Format dataset samples for training"""
     question = sample["question"]
     chosen_answer = (
         f"<think>\n{sample['chosen_reason']}\n</think>\n"
@@ -49,6 +48,7 @@ def format_dolly(sample):
 
     user_prompt = question
     
+
     chat_conversations = [
         {"role": "user", "content": user_prompt},
         {"role": "assistant", "content": chosen_answer}
@@ -56,174 +56,149 @@ def format_dolly(sample):
 
     return {"conversation": chat_conversations}
 
-def prepare_dataset(dataset_name, tokenizer):
-    """Load and prepare dataset for training"""
-    # Load dataset
-    dataset = load_dataset(dataset_name, split="train")
-    print(f"Dataset size: {len(dataset)}")
-    
-    # Apply formatting
-    dataset = dataset.map(format_dolly).filter(lambda x: x is not None and x["conversation"] is not None)
-    
-    # Apply chat template
-    reasoning_conversations = tokenizer.apply_chat_template(
-        dataset["conversation"],
-        tokenize = False,
-    )
 
-    print(f"0. Length of reasoning conversations: {len(reasoning_conversations)}")
-    
-    # Convert to pandas Series and back to Dataset
-    import pandas as pd
-    reasoning_conversations = pd.Series(reasoning_conversations)
+# Apply formatting
+dataset = dataset.map(format_dolly).filter(lambda x: x is not None and x["conversation"] is not None)
 
-    reasoning_conversations.name = "text"
+reasoning_conversations = tokenizer.apply_chat_template(
+    dataset["conversation"],
+    tokenize = False,
+)
 
-    from datasets import Dataset
-    reasoning_conversations = Dataset.from_pandas(pd.DataFrame(reasoning_conversations))
-    reasoning_conversations = reasoning_conversations.shuffle(seed = 3407)
+import pandas as pd
+reasoning_conversations = pd.Series(reasoning_conversations)
 
-    print(f"1. reasoning conversations: {reasoning_conversations}")
-    
-    return reasoning_conversations
+reasoning_conversations.name = "text"
 
-def tokenize_function(examples, tokenizer):
-    """Tokenize the texts with padding and truncation"""
+from datasets import Dataset
+reasoning_conversations = Dataset.from_pandas(pd.DataFrame(reasoning_conversations))
+reasoning_conversations = reasoning_conversations.shuffle(seed = 3407)
+
+
+
+# 2. Now tokenize the formatted data
+def tokenize_function(examples):
+    # Tokenize the texts with padding and truncation
     return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=2048)
 
-def setup_model(model_name):
-    """Setup the model with LoRA configuration"""
-    device_map = "auto"
-    
-    # Load model
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        device_map=device_map,
-        trust_remote_code=True,
-    )
-    
-    # Configure LoRA
-    lora_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM",
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-        ],
-    )
-    
-    # Add LoRA adapters
-    model = get_peft_model(model, lora_config)
-    model.print_trainable_parameters()
-    
-    return model
 
+
+# Apply tokenization to create input_ids, attention_mask, etc.
+tokenized_dataset = reasoning_conversations.map(
+    tokenize_function,
+    batched=True,
+    remove_columns=["text"],
+)
+   
+
+# Split the tokenized dataset
+train_test_split = tokenized_dataset.train_test_split(test_size=0.1, seed=42)
+train_dataset = train_test_split["train"]
+eval_dataset = train_test_split["test"]
+
+
+# 3. Configure QLoRA
+lora_config = LoraConfig(
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+    target_modules=[
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        # "o_proj",
+        # "gate_proj",
+        # "up_proj",
+        # "down_proj",
+    ],
+)
+
+
+device_map = "auto"
+
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    #quantization_config=quantization_config,
+    device_map=device_map,
+    trust_remote_code=True,
+    # attn_implementation="flash_attention_2" #FlashAttention only supports Ampere GPUs or newer.
+)
+     
+
+
+
+# Load perplexity metric
+# perplexity = load("perplexity", module_type="metric")
+
+# def compute_metrics(eval_pred):
+#     logits, labels = eval_pred
+#     predictions = torch.nn.functional.softmax(torch.tensor(logits), dim=-1)
+#     return perplexity.compute(predictions=predictions, references=labels)
 def compute_metrics(eval_pred):
-    """Compute metrics for evaluation"""
-    return {}
+    return {} # Trainer will automatically log eval_loss for us.
 
-def setup_training_args(output_dir):
-    """Setup training arguments"""
-    return TrainingArguments(
-        output_dir=output_dir,
-        per_device_train_batch_size=2,
-        per_device_eval_batch_size=2,
-        gradient_accumulation_steps=4,
-        learning_rate=1e-4,
-        lr_scheduler_type="cosine",
-        warmup_ratio=0.1,
-        num_train_epochs=1,
-        fp16=True,
-        eval_strategy="steps",
-        eval_steps=100,
-        save_strategy="steps",
-        save_steps=200,
-        load_best_model_at_end=False,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
-        push_to_hub=False,
-        remove_unused_columns=False,
-        logging_dir="./logs",
-        logging_steps=20,
-        report_to="none",
-        gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
-        dataloader_pin_memory=False,
-        dataloader_num_workers=2,
-        max_grad_norm=1.0,
-        group_by_length=False,
-        length_column_name=None,
-        eval_accumulation_steps=1,
-    )
+# Add LoRA adapters to the model
+model = get_peft_model(model, lora_config)
+model.print_trainable_parameters()
 
-def main():
-    """Main training function"""
-    # Setup HuggingFace
-    api = setup_huggingface()
-    
-    # Setup tokenizer
-    tokenizer = setup_tokenizer(model_name)
-    
-    # Prepare dataset
-    reasoning_conversations = prepare_dataset(dataset_name, tokenizer)
-    
-    print(f"Length of reasoning conversations: {len(reasoning_conversations)}")
-    # Tokenize dataset
-    tokenized_dataset = reasoning_conversations.map(
-        lambda examples: tokenize_function(examples, tokenizer),
-        batched=True,
-        remove_columns=["text"],
-    )
-    
-    # Split dataset - handle small datasets
-    dataset_size = len(tokenized_dataset)
-    if dataset_size < 10:
-        print(f"Warning: Dataset too small ({dataset_size} samples) for train-test split. Using full dataset for training.")
-        train_dataset = tokenized_dataset
-        eval_dataset = tokenized_dataset  # Use same data for evaluation in small datasets
-    else:
-        train_test_split = tokenized_dataset.train_test_split(test_size=0.1, seed=42)
-        train_dataset = train_test_split["train"]
-        eval_dataset = train_test_split["test"]
-    
-    print(f"Train dataset: {train_dataset}")
-    print(f"Eval dataset: {eval_dataset}")
-    
-    # Setup model
-    model = setup_model(model_name)
-    
-    # Setup data collator
-    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
-    
-    # Setup training arguments
-    training_args = setup_training_args(output_dir)
-    
-    # Create trainer
-    trainer = Trainer(
-        model=model,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        args=training_args,
-        data_collator=data_collator,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
-    )
-    
-    # Enable optimizations
-    torch.backends.cuda.enable_flash_sdp(True)
-    torch.backends.cuda.enable_mem_efficient_sdp(True)
-    torch.backends.cuda.enable_math_sdp(False)
-    
-    # Train model
-    train_result = trainer.train()
-    
-    # Save adapter
-    model.save_pretrained("output_dir/adapter_a")
-    
-    print("Training completed!")
 
-if __name__ == "__main__":
-    main()
+output_dir = "./adapter1"  # Directory to save fine-tuned model
+
+
+data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+
+
+training_args = TrainingArguments(
+    output_dir=output_dir,
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,  # Keep at 1
+    gradient_accumulation_steps=4,  # Increased to maintain batch size
+    learning_rate=1e-4,  # Slightly reduced learning rate
+    lr_scheduler_type="cosine",
+    warmup_ratio=0.1,
+    num_train_epochs=1,  # Reduced from 3 to 2
+    fp16=True,
+    eval_strategy="steps",
+    eval_steps=100,  # Increased eval steps to reduce frequency
+    save_strategy="steps",
+    save_steps=200,
+    load_best_model_at_end=False,  # Disabled to save memory
+    metric_for_best_model="eval_loss",
+    greater_is_better=False,
+    push_to_hub=False,
+    remove_unused_columns=False,
+    logging_dir="./logs",
+    logging_steps=20,
+    report_to="none",
+    gradient_checkpointing=True,
+    gradient_checkpointing_kwargs={"use_reentrant": False},
+    dataloader_pin_memory=False,  # Disable pin memory to save GPU memory
+    dataloader_num_workers=2,     # Use single worker to save memory
+    max_grad_norm=1.0,           # Add gradient clipping
+    group_by_length=False,       # Disable to save memory
+    length_column_name=None,
+    eval_accumulation_steps=1,   # Process eval in smaller chunks
+)
+
+
+trainer = Trainer(
+    model=model,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    args=training_args,
+    data_collator=data_collator,
+    # compute_metrics=compute_metrics,
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
+)
+
+
+torch.backends.cuda.enable_flash_sdp(True)
+torch.backends.cuda.enable_mem_efficient_sdp(True)
+torch.backends.cuda.enable_math_sdp(False)
+train_result = trainer.train()
+from peft import PeftModel
+
+# model_a là model đang train adapter A
+model.save_pretrained("output_dir/adapter_a")
