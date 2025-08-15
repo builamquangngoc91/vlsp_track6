@@ -83,16 +83,18 @@ reasoning_conversations = tokenizer.apply_chat_template(
 print(f"Reasoning conversations: {reasoning_conversations}")
 
 
-import pandas as pd
-reasoning_conversations = pd.Series(reasoning_conversations)
-
-reasoning_conversations.name = "text"
-
 from datasets import Dataset
-reasoning_conversations = Dataset.from_pandas(pd.DataFrame(reasoning_conversations))
-reasoning_conversations = reasoning_conversations.shuffle(seed = 3407)
-print(f"Final dataset size before tokenization: {reasoning_conversations}")
+import pandas as pd
 
+df = pd.read_csv("reasoning_conversations.csv")
+
+df = df[['text']]
+
+reasoning_conversations = Dataset.from_pandas(df)
+
+reasoning_conversations = reasoning_conversations.shuffle(seed=3407)
+
+print(f"Final dataset size before tokenization: {reasoning_conversations}")
 
 
 # 2. Now tokenize the formatted data
