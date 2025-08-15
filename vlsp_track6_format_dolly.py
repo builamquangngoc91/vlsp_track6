@@ -63,10 +63,7 @@ def prepare_dataset(dataset_name, tokenizer):
     print(f"Dataset size: {len(dataset)}")
     
     # Apply formatting
-    dataset = dataset.map(format_dolly)
-    print(f"Dataset size after formatting: {len(dataset)}")
-    dataset = dataset.filter(lambda x: x is not None and x["conversation"] is not None)
-    print(f"Dataset size after filtering: {len(dataset)}")
+    dataset = dataset.map(format_dolly).filter(lambda x: x is not None and x["conversation"] is not None)
     
     # Apply chat template
     reasoning_conversations = tokenizer.apply_chat_template(
