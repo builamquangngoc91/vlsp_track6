@@ -37,28 +37,43 @@ print(f"After : {tokenizer.pad_token}")
 # 2. Load the dataset
 dataset_name = "thailevann/finetune_track6_vlsp"
 dataset = load_dataset(dataset_name, split="train")
+print(f"Original dataset size: {len(dataset)}")
+
+# Check the structure of the first sample
+if len(dataset) > 0:
+    print(f"First sample keys: {dataset[0].keys()}")
+    print(f"First sample: {dataset[0]}")
 
 # 1. Format the dataset first
 def format_dolly(sample):
-    question = sample["question"]
-    chosen_answer = (
-        f"<think>\n{sample['chosen_reason']}\n</think>\n"
-        f"{sample['chosen_answer']}"
-    )
+    try:
+        question = sample["question"]
+        chosen_answer = (
+            f"<think>\n{sample['chosen_reason']}\n</think>\n"
+            f"{sample['chosen_answer']}"
+        )
 
-    user_prompt = question
-    
+        user_prompt = question
+        
 
-    chat_conversations = [
-        {"role": "user", "content": user_prompt},
-        {"role": "assistant", "content": chosen_answer}
-    ]
+        chat_conversations = [
+            {"role": "user", "content": user_prompt},
+            {"role": "assistant", "content": chosen_answer}
+        ]
 
-    return {"conversation": chat_conversations}
+        return {"conversation": chat_conversations}
+    except KeyError as e:
+        print(f"Missing key in sample: {e}")
+        print(f"Sample keys: {sample.keys()}")
+        return None
+    except Exception as e:
+        print(f"Error processing sample: {e}")
+        return None
 
 
 # Apply formatting
 dataset = dataset.map(format_dolly).filter(lambda x: x is not None and x["conversation"] is not None)
+print(f"Dataset size after formatting and filtering: {len(dataset)}")
 
 reasoning_conversations = tokenizer.apply_chat_template(
     dataset["conversation"],
@@ -73,6 +88,7 @@ reasoning_conversations.name = "text"
 from datasets import Dataset
 reasoning_conversations = Dataset.from_pandas(pd.DataFrame(reasoning_conversations))
 reasoning_conversations = reasoning_conversations.shuffle(seed = 3407)
+print(f"Final dataset size before tokenization: {len(reasoning_conversations)}")
 
 
 
@@ -89,12 +105,22 @@ tokenized_dataset = reasoning_conversations.map(
     batched=True,
     remove_columns=["text"],
 )
+print(f"Tokenized dataset size: {len(tokenized_dataset)}")
    
 
 # Split the tokenized dataset
-train_test_split = tokenized_dataset.train_test_split(test_size=0.1, seed=42)
-train_dataset = train_test_split["train"]
-eval_dataset = train_test_split["test"]
+# Check if we have enough samples for a proper train-test split
+if len(tokenized_dataset) > 10:  # Need at least 10 samples for a meaningful split
+    train_test_split = tokenized_dataset.train_test_split(test_size=0.1, seed=42)
+    train_dataset = train_test_split["train"]
+    eval_dataset = train_test_split["test"]
+    print(f"Train dataset size: {len(train_dataset)}")
+    print(f"Eval dataset size: {len(eval_dataset)}")
+else:
+    # If we have very few samples, use the entire dataset for both training and evaluation
+    print(f"Warning: Only {len(tokenized_dataset)} samples available. Using entire dataset for both training and evaluation.")
+    train_dataset = tokenized_dataset
+    eval_dataset = tokenized_dataset  # Use same dataset for evaluation when we have very few samples
 
 
 # 3. Configure QLoRA
