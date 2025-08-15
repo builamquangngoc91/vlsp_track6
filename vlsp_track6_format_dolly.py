@@ -68,16 +68,20 @@ def prepare_dataset(dataset_name, tokenizer):
     # Apply chat template
     reasoning_conversations = tokenizer.apply_chat_template(
         dataset["conversation"],
-        tokenize=False,
+        tokenize = False,
     )
 
     print(f"0. Length of reasoning conversations: {len(reasoning_conversations)}")
     
     # Convert to pandas Series and back to Dataset
+    import pandas as pd
     reasoning_conversations = pd.Series(reasoning_conversations)
+
     reasoning_conversations.name = "text"
+
+    from datasets import Dataset
     reasoning_conversations = Dataset.from_pandas(pd.DataFrame(reasoning_conversations))
-    reasoning_conversations = reasoning_conversations.shuffle(seed=3407)
+    reasoning_conversations = reasoning_conversations.shuffle(seed = 3407)
 
     print(f"1. reasoning conversations: {reasoning_conversations}")
     
