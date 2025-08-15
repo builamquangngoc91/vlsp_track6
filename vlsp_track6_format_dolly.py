@@ -73,6 +73,8 @@ def prepare_dataset(dataset_name, tokenizer):
         dataset["conversation"],
         tokenize=False,
     )
+
+    print(f"0. Length of reasoning conversations: {len(reasoning_conversations)}")
     
     # Convert to pandas Series and back to Dataset
     reasoning_conversations = pd.Series(reasoning_conversations)
