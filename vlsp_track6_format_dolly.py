@@ -63,7 +63,10 @@ def prepare_dataset(dataset_name, tokenizer):
     print(f"Dataset size: {len(dataset)}")
     
     # Apply formatting
-    dataset = dataset.map(format_dolly).filter(lambda x: x is not None and x["conversation"] is not None)
+    dataset = dataset.map(format_dolly)
+    print(f"Dataset size after formatting: {len(dataset)}")
+    dataset = dataset.filter(lambda x: x is not None and x["conversation"] is not None)
+    print(f"Dataset size after filtering: {len(dataset)}")
     
     # Apply chat template
     reasoning_conversations = tokenizer.apply_chat_template(
@@ -170,10 +173,16 @@ def main():
         remove_columns=["text"],
     )
     
-    # Split dataset
-    train_test_split = tokenized_dataset.train_test_split(test_size=0.1, seed=42)
-    train_dataset = train_test_split["train"]
-    eval_dataset = train_test_split["test"]
+    # Split dataset - handle small datasets
+    dataset_size = len(tokenized_dataset)
+    if dataset_size < 10:
+        print(f"Warning: Dataset too small ({dataset_size} samples) for train-test split. Using full dataset for training.")
+        train_dataset = tokenized_dataset
+        eval_dataset = tokenized_dataset  # Use same data for evaluation in small datasets
+    else:
+        train_test_split = tokenized_dataset.train_test_split(test_size=0.1, seed=42)
+        train_dataset = train_test_split["train"]
+        eval_dataset = train_test_split["test"]
     
     print(f"Train dataset: {train_dataset}")
     print(f"Eval dataset: {eval_dataset}")
