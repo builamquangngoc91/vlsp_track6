@@ -19,7 +19,7 @@ import pandas as pd
 from huggingface_hub import HfApi, login
 
 # Configuration
-HF_TOKEN = login(token=HF_TOKEN)  #
+HF_TOKEN = login(token=os.getenv("HF_TOKEN"))  #
 model_name = "VLSP2025-LegalSML/qwen3-1.7b-legal-pretrain"
 dataset_name = "thailevann/finetune_track6_vlsp"
 output_dir = "./adapter1"
