@@ -91,7 +91,7 @@ reasoning_conversations.name = "text"
 from datasets import Dataset
 reasoning_conversations = Dataset.from_pandas(pd.DataFrame(reasoning_conversations))
 reasoning_conversations = reasoning_conversations.shuffle(seed = 3407)
-print(f"Final dataset size before tokenization: {len(reasoning_conversations)}")
+print(f"Final dataset size before tokenization: {reasoning_conversations}")
 
 
 
