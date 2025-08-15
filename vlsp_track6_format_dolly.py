@@ -80,6 +80,9 @@ reasoning_conversations = tokenizer.apply_chat_template(
     tokenize = False,
 )
 
+print(f"Reasoning conversations: {reasoning_conversations}")
+
+
 import pandas as pd
 reasoning_conversations = pd.Series(reasoning_conversations)
 
